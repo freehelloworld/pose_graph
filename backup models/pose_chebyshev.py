@@ -23,7 +23,7 @@ class PoseGraphNet(nn.Module):
 
         N = img_size ** 2
 
-        self.fc = nn.Linear(N*2, 2, bias=False)
+        self.fc = nn.Linear(N*2*3, 2, bias=False)
 
         col, row = np.meshgrid(np.arange(img_size), np.arange(img_size))
         coord = np.stack((col, row), axis=2).reshape(-1, 2)
@@ -45,17 +45,23 @@ class PoseGraphNet(nn.Module):
         self.register_buffer('coord', coord)
 
     def forward(self, x):
-        # shape of x is [500, 100, 2]
         B = x.size(0)
-
+        N = 100
         self.A = self.pred_edge_fc(self.coord).squeeze()
+        A = self.A
+        K = 3  # Maximum number of hops (filter size)
+        D = torch.sum(A, 1)  # Node degrees
+        D = (D + 1e-5) ** (-0.5)  # D^-1/2
+        L_hat = - D.view(N, 1) * A * D.view(1, N)  # Rescaled normalized graph Laplacian without self-loops
 
-        # m1 is of shape torch.Size([500, 100, 100]), m2 is of shape torch.Size([500, 100, 2])
-        x = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2).float())
+        X_cheb = [x, torch.bmm(L_hat.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2))]  # Node features, Average features of 1-hop neighbors
+        # Recursive computation of features projected onto the Chebyshev basis
+        for k in range(2, K):
+            X_cheb.append(2 * torch.bmm(L_hat.unsqueeze(0).expand(B, -1, -1), X_cheb[k - 1]) - X_cheb[k - 2])
+        X_cheb = torch.stack(X_cheb, 2)  # Input features in the Chebyshev basis: torch.Size([6, 2, 3])
+        x = X_cheb.view(B, -1)
+        x = self.fc(x)
 
-        # x size is [500, 100, 2]
-        x = self.fc(x.view(B, -1))
-        # x size is [500, 200]
         return x
 
 
@@ -171,7 +177,7 @@ def main():
                               shuffle=True, num_workers=0)
 
     model = PoseGraphNet()
-
+    model = model.double()
     #writer.add_graph(model)
     model.to(device)
     print(model)

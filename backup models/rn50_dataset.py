@@ -7,10 +7,10 @@ import torch
 import json
 
 
-POSE_FILE = '/Users/peter/Downloads/pose_data/MJFF_{0}/{1}_keypoints.json'
+FEATURE_FILE = '/home/rsun6573/work/pd_work/res_net_50_features/MJFF_{0}/{1}.csv'
 
 
-class PoseNomalise(object):
+class FeatureNomalise(object):
     def __init__(self, output_size):
         self.output_size = output_size
 
@@ -20,7 +20,7 @@ class PoseNomalise(object):
         return {'pose': pose, 'label': label}
 
 
-class PoseDataset(Dataset):
+class Rn50Dataset(Dataset):
     """Pose dataset."""
 
     def __init__(self, csv_file, fold_id, is_training, transform=None):
@@ -38,7 +38,7 @@ class PoseDataset(Dataset):
         video_id = self.video_df.iloc[idx, 2]
         file_id = (second_id - 1) * 25 + 12
         try:
-            file_name = POSE_FILE.format(video_id, file_id,)
+            file_name = FEATURE_FILE.format(video_id, file_id,)
             pose = self._read_pose(file_name)
             if len(pose) > 200:
                 pose = pose[0:200]
@@ -113,19 +113,3 @@ class PoseDataset(Dataset):
                 else:
                     pass
         return pose
-
-
-# train_data = PoseDataset('pose_data_grouped.csv', 1, True)
-# print(len(train_data))
-#
-# test_data = PoseDataset('pose_data_grouped.csv', 1, False)
-# print(len(test_data))
-#
-# train_loader = DataLoader(train_data, batch_size=4,
-#                         shuffle=True, num_workers=0)
-#
-# for i_batch, sample_batched in enumerate(train_loader):
-#     data = sample_batched['pose']
-#     target = sample_batched['label']
-#
-#     print(target)

@@ -22,41 +22,35 @@ class PoseGraphNet(nn.Module):
         super(PoseGraphNet, self).__init__()
 
         N = img_size ** 2
-
         self.fc = nn.Linear(N*2, 2, bias=False)
 
-        col, row = np.meshgrid(np.arange(img_size), np.arange(img_size))
-        coord = np.stack((col, row), axis=2).reshape(-1, 2)
-        coord = (coord - np.mean(coord, axis=0)) / (np.std(coord, axis=0) + 1e-5)
-
-        coord = torch.from_numpy(coord).float()
-
-        # coord will be [100, 100, 4] after this
-        coord = torch.cat((coord.unsqueeze(0).repeat(N, 1, 1),
-                           coord.unsqueeze(1).repeat(1, N, 1)), dim=2)
-
-
-        # output of pred_edge_fc is [100,100,1]
-        self.pred_edge_fc = nn.Sequential(nn.Linear(4, 64),
-                                          nn.ReLU(),
-                                          nn.Linear(64, 1),
-                                          nn.Tanh())
-
-        self.register_buffer('coord', coord)
+        # col, row = np.meshgrid(np.arange(img_size), np.arange(img_size))
+        # coord = np.stack((col, row), axis=2).reshape(-1, 2)
+        # coord = (coord - np.mean(coord, axis=0)) / (np.std(coord, axis=0) + 1e-5)
+        #
+        # coord = torch.from_numpy(coord).float()
+        #
+        # # coord will be [100, 100, 4] after this
+        # coord = torch.cat((coord.unsqueeze(0).repeat(N, 1, 1),
+        #                    coord.unsqueeze(1).repeat(1, N, 1)), dim=2)
+        #
+        # # output of pred_edge_fc is [100,100,1]
+        # self.pred_edge_fc = nn.Sequential(nn.Linear(4, 64),
+        #                                   nn.ReLU(),
+        #                                   nn.Linear(64, 1),
+        #                                   nn.Tanh())
+        #
+        # self.register_buffer('coord', coord)
 
     def forward(self, x):
-        # shape of x is [500, 100, 2]
         B = x.size(0)
+        #self.A = self.pred_edge_fc(self.coord).squeeze()
+        m = nn.Bilinear(2, 2, 100)
+        A = m(x.view(B, -1, 2).float(), x.view(B, -1, 2).float())
 
-        self.A = self.pred_edge_fc(self.coord).squeeze()
+        x = torch.bmm(A, x.view(B, -1, 2).float())
 
-        # m1 is of shape torch.Size([500, 100, 100]), m2 is of shape torch.Size([500, 100, 2])
-        x = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2).float())
-
-        # x size is [500, 100, 2]
-        x = self.fc(x.view(B, -1))
-        # x size is [500, 200]
-        return x
+        return self.fc(x.view(B, -1))
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -70,6 +64,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
         optimizer.zero_grad()
         output = model(data)
+        output = torch.sigmoid(output)
 
         loss = F.cross_entropy(output, target)
 
@@ -99,6 +94,7 @@ def test(args, model, device, test_loader):
             target = sample_batched['label']
             data, target = data.to(device), target.to(device)
             output = model(data)
+            output = torch.sigmoid(output)
 
             postive_results = output[:, 1]
 
@@ -171,7 +167,6 @@ def main():
                               shuffle=True, num_workers=0)
 
     model = PoseGraphNet()
-
     #writer.add_graph(model)
     model.to(device)
     print(model)

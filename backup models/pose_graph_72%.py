@@ -22,7 +22,6 @@ class PoseGraphNet(nn.Module):
         super(PoseGraphNet, self).__init__()
 
         N = img_size ** 2
-
         self.fc = nn.Linear(N*2, 2, bias=False)
 
         col, row = np.meshgrid(np.arange(img_size), np.arange(img_size))
@@ -31,9 +30,14 @@ class PoseGraphNet(nn.Module):
 
         coord = torch.from_numpy(coord).float()
 
-        # coord will be [100, 100, 4] after this
+        # print(coord.unsqueeze(0).repeat(N, 1, 1).shape) # torch.Size([100, 100, 2])
+        # print(coord.unsqueeze(1).repeat(1, N, 1).shape) # torch.Size([100, 100, 2]
+        # coord will be [100, 100, 8] after this
         coord = torch.cat((coord.unsqueeze(0).repeat(N, 1, 1),
+                           # coord.unsqueeze(0).repeat(N, 1, 1),
+                           # coord.unsqueeze(1).repeat(1, N, 1),
                            coord.unsqueeze(1).repeat(1, N, 1)), dim=2)
+
 
 
         # output of pred_edge_fc is [100,100,1]
@@ -45,18 +49,29 @@ class PoseGraphNet(nn.Module):
         self.register_buffer('coord', coord)
 
     def forward(self, x):
-        # shape of x is [500, 100, 2]
         B = x.size(0)
-
         self.A = self.pred_edge_fc(self.coord).squeeze()
+        # N = 100
+        # A_hat = self.A + torch.eye(N)  # Add self-loops
+        # D_hat = torch.sum(A_hat, 1)  # Node degrees
+        # D_hat = (D_hat + 1e-5) ** (-0.5)  # D^-1/2
+        # L_hat = D_hat.view(N, 1) * A_hat * D_hat.view(1, N)  # Rescaled normalized graph Laplacian with self-loops
+        # print(L_hat)
+        print(self.A)
+        layer_1 = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2).float())
 
-        # m1 is of shape torch.Size([500, 100, 100]), m2 is of shape torch.Size([500, 100, 2])
-        x = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2).float())
+        #layer_1 = F.relu(layer_1)
+        # nn.Linear, ReLU
 
-        # x size is [500, 100, 2]
-        x = self.fc(x.view(B, -1))
-        # x size is [500, 200]
-        return x
+        # layer_2 = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), layer_1)
+        #
+        # layer_2 = F.relu(layer_2)
+        #
+        # # nn.Linear, ReLU
+        #
+        # result = layer_1.add(layer_2)/2
+
+        return self.fc(layer_1.view(B, -1))
 
 
 def train(args, model, device, train_loader, optimizer, epoch):
@@ -70,6 +85,7 @@ def train(args, model, device, train_loader, optimizer, epoch):
 
         optimizer.zero_grad()
         output = model(data)
+        output = torch.sigmoid(output)
 
         loss = F.cross_entropy(output, target)
 
@@ -99,6 +115,7 @@ def test(args, model, device, test_loader):
             target = sample_batched['label']
             data, target = data.to(device), target.to(device)
             output = model(data)
+            output = torch.sigmoid(output)
 
             postive_results = output[:, 1]
 
@@ -171,7 +188,6 @@ def main():
                               shuffle=True, num_workers=0)
 
     model = PoseGraphNet()
-
     #writer.add_graph(model)
     model.to(device)
     print(model)

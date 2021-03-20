@@ -25,6 +25,10 @@ class PoseGraphNet(nn.Module):
 
         self.fc = nn.Linear(N*2, 2, bias=False)
 
+        # self.fc1 = nn.Linear(N * 2, 20, bias=False)
+        #
+        # self.fc2 = nn.Linear(20, 2, bias=False)
+
         col, row = np.meshgrid(np.arange(img_size), np.arange(img_size))
         coord = np.stack((col, row), axis=2).reshape(-1, 2)
         coord = (coord - np.mean(coord, axis=0)) / (np.std(coord, axis=0) + 1e-5)
@@ -45,17 +49,25 @@ class PoseGraphNet(nn.Module):
         self.register_buffer('coord', coord)
 
     def forward(self, x):
-        # shape of x is [500, 100, 2]
         B = x.size(0)
-
+        N = 100
         self.A = self.pred_edge_fc(self.coord).squeeze()
+        A = self.A
+        print('hat', self.coord)
+        A_hat = A + torch.eye(N)  # Add self-loops
 
-        # m1 is of shape torch.Size([500, 100, 100]), m2 is of shape torch.Size([500, 100, 2])
-        x = torch.bmm(self.A.unsqueeze(0).expand(B, -1, -1), x.view(B, -1, 2).float())
+        D_hat = torch.sum(A_hat, 1)  # Node degrees
 
-        # x size is [500, 100, 2]
-        x = self.fc(x.view(B, -1))
-        # x size is [500, 200]
+        D_hat = (D_hat + 1e-5) ** (-0.5)  # D^-1/2
+
+        L_hat = D_hat.view(N, 1) * A_hat * D_hat.view(1, N)  # Rescaled normalized graph Laplacian with self-loops
+
+        x = torch.bmm(L_hat.unsqueeze(0).expand(B, -1, -1).float(), x.view(B, -1, 2).float())
+
+        x = x.view(B, -1)
+
+        x = self.fc(x)
+
         return x
 
 
@@ -164,10 +176,10 @@ def main():
         PoseNomalise(100)
     ]))
 
-    train_loader = DataLoader(train_data, batch_size=500,
+    train_loader = DataLoader(train_data, batch_size=4,
                             shuffle=True, num_workers=0)
 
-    test_loader = DataLoader(test_data, batch_size=500,
+    test_loader = DataLoader(test_data, batch_size=4,
                               shuffle=True, num_workers=0)
 
     model = PoseGraphNet()
